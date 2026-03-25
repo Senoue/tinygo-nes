@@ -50,14 +50,20 @@ func main() {
 	console.CPU.SP = 0xFD
 	console.CPU.SetFlags(0x24)
 
-	// Emulation loop - render every 2nd frame
-	var batchBuf [320 * 2 * 8]byte
+	// Emulation loop - render every frame, 256px wide, 16-line batches
+	const batchLines = 24
+	const nesW = 256
+	const offsetX = 32
+	var batchBuf [nesW * 2 * batchLines]byte
+
 	frameCount := byte(0)
 	for {
 		buttons := GetPressedButtons()
 		console.SetButtons1(buttons)
 		console.StepFrame()
 		frameCount++
+
+		OutputAudio(console.APU.Output())
 
 		if frameCount&1 != 0 {
 			continue
@@ -67,29 +73,19 @@ func main() {
 		if buf == nil {
 			continue
 		}
-		for yBatch := 0; yBatch < 240; yBatch += 8 {
-			for y := 0; y < 8; y++ {
-				renderLine(buf, yBatch+y, batchBuf[:], y)
+		for yBatch := 0; yBatch < 240; yBatch += batchLines {
+			for row := 0; row < batchLines; row++ {
+				y := yBatch + row
+				lineOff := row * nesW * 2
+				for x := 0; x < nesW; x++ {
+					rgb565 := nes.PaletteRGB565[buf[y*nesW+x]]
+					batchBuf[lineOff] = byte(rgb565 >> 8)
+					batchBuf[lineOff+1] = byte(rgb565)
+					lineOff += 2
+				}
 			}
-			display.DrawRGBBitmap8(0, int16(yBatch), batchBuf[:], 320, 8)
+			display.DrawRGBBitmap8(int16(offsetX), int16(yBatch), batchBuf[:], nesW, batchLines)
 		}
-	}
-}
-
-func renderLine(buf *[256 * 240]byte, y int, batch []byte, batchRow int) {
-	const lineStride = 320 * 2
-	lineOffset := batchRow * lineStride
-	// Zero the line region within the batch
-	for i := lineOffset; i < lineOffset+lineStride; i++ {
-		batch[i] = 0
-	}
-	const offsetX = 32
-	for x := 0; x < 256; x++ {
-		idx := buf[y*256+x]
-		rgb565 := nes.PaletteRGB565[idx]
-		dstIdx := lineOffset + (x+offsetX)*2
-		batch[dstIdx] = byte(rgb565 >> 8)
-		batch[dstIdx+1] = byte(rgb565)
 	}
 }
 

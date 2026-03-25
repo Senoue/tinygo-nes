@@ -670,3 +670,193 @@ func (ppu *PPU) Step() {
 		ppu.flagSpriteOverflow = 0
 	}
 }
+
+// RenderScanline processes an entire scanline at once for better performance.
+// This reduces per-frame calls from 89,342 (341×262) to 262.
+func (ppu *PPU) RenderScanline() {
+	// Process any pending NMI delay (would normally tick down each cycle;
+	// approximate by processing it once per scanline)
+	if ppu.nmiDelay > 0 {
+		if ppu.nmiDelay <= 114 { // ~341/3 PPU cycles worth of CPU ticks
+			ppu.nmiDelay = 0
+			if ppu.nmiOutput && ppu.nmiOccurred {
+				ppu.console.CPU.triggerNMI()
+			}
+		} else {
+			ppu.nmiDelay -= 114
+		}
+	}
+
+	renderingEnabled := ppu.flagShowBackground != 0 || ppu.flagShowSprites != 0
+	scanline := ppu.ScanLine
+
+	switch {
+	case scanline < 240:
+		// Visible scanline: render pixels
+		if renderingEnabled {
+			// Evaluate sprites for this scanline
+			ppu.evaluateSprites()
+
+			// Render 256 background pixels
+			ppu.renderScanlineBackground(scanline)
+
+			// Overlay sprites
+			ppu.renderScanlineSprites(scanline)
+
+			// End of scanline: increment Y and copy X
+			ppu.incrementY()
+			ppu.copyX()
+		}
+
+		// Set Cycle to 280 for mapper4 compatibility (it checks Cycle==280)
+		ppu.Cycle = 280
+		if ppu.console.mapperHasStep {
+			ppu.console.Mapper.Step()
+		}
+
+	case scanline == 240:
+		// Post-render scanline: do nothing
+
+	case scanline == 241:
+		// VBlank start
+		ppu.setVerticalBlank()
+
+	case scanline == 261:
+		// Pre-render scanline
+		ppu.clearVerticalBlank()
+		ppu.flagSpriteZeroHit = 0
+		ppu.flagSpriteOverflow = 0
+
+		if renderingEnabled {
+			ppu.copyY()
+			ppu.copyX()
+
+			// Set Cycle to 280 for mapper4 compatibility
+			ppu.Cycle = 280
+			if ppu.console.mapperHasStep {
+				ppu.console.Mapper.Step()
+			}
+		}
+	}
+
+	// Advance to next scanline
+	ppu.ScanLine++
+	if ppu.ScanLine > 261 {
+		ppu.ScanLine = 0
+		ppu.Frame++
+		ppu.f ^= 1
+	}
+}
+
+// renderScanlineBackground renders all 256 background pixels for a scanline.
+func (ppu *PPU) renderScanlineBackground(scanline int) {
+	if ppu.flagShowBackground == 0 {
+		// Fill with background color
+		bgColor := ppu.readPalette(0) % 64
+		for x := 0; x < 256; x++ {
+			ppu.front[scanline*256+x] = bgColor
+		}
+		return
+	}
+
+	fineY := (ppu.v >> 12) & 7
+	table := uint16(ppu.flagBackgroundTable)
+
+	// We need to render 256 pixels. Due to fine X scroll, we may need 33 tiles.
+	// Save v so we can restore coarse X iteration state properly.
+	fineX := ppu.x
+	pixelX := 0
+
+	for pixelX < 256 {
+		// Fetch tile data from current v
+		ntAddr := 0x2000 | (ppu.v & 0x0FFF)
+		nameTableByte := ppu.Read(ntAddr)
+
+		atAddr := uint16(0x23C0) | (ppu.v & 0x0C00) | ((ppu.v >> 4) & 0x38) | ((ppu.v >> 2) & 0x07)
+		shift := ((ppu.v >> 4) & 4) | (ppu.v & 2)
+		attribute := ((ppu.Read(atAddr) >> shift) & 3) << 2
+
+		patAddr := 0x1000*table + uint16(nameTableByte)*16 + fineY
+		lowByte := ppu.Read(patAddr)
+		highByte := ppu.Read(patAddr + 8)
+
+		// Render pixels from this tile
+		startBit := int(fineX)
+		for bit := startBit; bit < 8 && pixelX < 256; bit++ {
+			shift := uint(7 - bit)
+			p1 := (lowByte >> shift) & 1
+			p2 := (highByte >> shift) & 1
+			color := attribute | p2<<1 | p1
+
+			if pixelX < 8 && ppu.flagShowLeftBackground == 0 {
+				color = 0
+			}
+
+			ppu.front[scanline*256+pixelX] = ppu.readPalette(uint16(color)) % 64
+			pixelX++
+		}
+
+		// After first tile, fine X is 0
+		fineX = 0
+
+		// Increment coarse X in v
+		ppu.incrementX()
+	}
+}
+
+// renderScanlineSprites overlays sprite pixels on the already-rendered background.
+func (ppu *PPU) renderScanlineSprites(scanline int) {
+	if ppu.flagShowSprites == 0 {
+		return
+	}
+
+	// Process sprites in reverse order so lower-index sprites have priority
+	for i := ppu.spriteCount - 1; i >= 0; i-- {
+		spriteX := int(ppu.spritePositions[i])
+		pattern := ppu.spritePatterns[i]
+		priority := ppu.spritePriorities[i]
+		spriteIdx := ppu.spriteIndexes[i]
+
+		for j := 0; j < 8; j++ {
+			px := spriteX + j
+			if px < 0 || px >= 256 {
+				continue
+			}
+
+			// Extract sprite pixel color from pattern (MSB first)
+			offset := uint(7 - j)
+			spriteColor := byte((pattern >> (offset * 4)) & 0x0F)
+
+			if spriteColor%4 == 0 {
+				// Transparent sprite pixel
+				continue
+			}
+
+			if px < 8 && ppu.flagShowLeftSprites == 0 {
+				continue
+			}
+
+			// Read existing background pixel to determine bg/sprite compositing
+			bgPaletteIdx := ppu.front[scanline*256+px]
+			bgColor := byte(0)
+			// Check if the background pixel is non-transparent
+			// We need to check the original background color index, not the palette result.
+			// Re-derive: if bgPaletteIdx == readPalette(0)%64, it's background color (transparent bg)
+			bgIsTransparent := (bgPaletteIdx == ppu.readPalette(0)%64)
+
+			if !bgIsTransparent {
+				bgColor = 1 // non-zero means bg pixel is opaque
+			}
+
+			// Sprite 0 hit detection
+			if spriteIdx == 0 && bgColor != 0 && px < 255 {
+				ppu.flagSpriteZeroHit = 1
+			}
+
+			// Priority: 0 = sprite in front of bg, 1 = sprite behind bg
+			if priority == 0 || bgColor == 0 {
+				ppu.front[scanline*256+px] = ppu.readPalette(uint16(spriteColor)|0x10) % 64
+			}
+		}
+	}
+}

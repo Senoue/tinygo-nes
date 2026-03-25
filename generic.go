@@ -41,3 +41,7 @@ func GetPressedButtons() [8]bool {
 	}
 	return buttons
 }
+
+func OutputAudio(sample float32) {
+	// No audio on desktop
+}

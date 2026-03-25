@@ -92,14 +92,14 @@ func (apu *APU) Step() {
 }
 
 func (apu *APU) sendSample() {
-	output := apu.filterChain.Step(apu.output())
+	output := apu.filterChain.Step(apu.Output())
 	select {
 	case apu.channel <- output:
 	default:
 	}
 }
 
-func (apu *APU) output() float32 {
+func (apu *APU) Output() float32 {
 	p1 := apu.pulse1.output()
 	p2 := apu.pulse2.output()
 	t := apu.triangle.output()

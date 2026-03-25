@@ -59,9 +59,20 @@ func (console *Console) Step() int {
 
 func (console *Console) StepFrame() int {
 	cpuCycles := 0
-	frame := console.PPU.Frame
-	for frame == console.PPU.Frame {
-		cpuCycles += console.Step()
+	startFrame := console.PPU.Frame
+	for startFrame == console.PPU.Frame {
+		// Run CPU for approximately one scanline (~114 CPU cycles = ~341 PPU cycles)
+		scanlineCycles := 0
+		for scanlineCycles < 114 {
+			c := console.CPU.Step()
+			scanlineCycles += c
+			cpuCycles += c
+			for i := 0; i < c; i++ {
+				console.APU.Step()
+			}
+		}
+		// Process one scanline
+		console.PPU.RenderScanline()
 	}
 	return cpuCycles
 }
