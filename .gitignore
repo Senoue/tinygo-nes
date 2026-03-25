@@ -1,0 +1,7 @@
+*.uf2
+*.nes
+*.bin
+roms/
+img/
+png/
+frame300.png
