@@ -93,6 +93,22 @@ nes/             - NESエミュレーターコア (fogleman/nes フォーク)
   memory.go      - ミラーリングアドレス計算
 ```
 
+## ROM の入手
+
+本リポジトリにROMファイルは含まれていません。以下の方法で合法的に入手できます。
+
+### Homebrew ROM (おすすめ)
+
+NES開発者コミュニティが公開している自作ゲームです。無料で合法的に利用できます。
+
+- [NESdev Homebrew](https://www.nesdev.org/wiki/Homebrew) - コミュニティ作品リスト
+- [NES Homebrew on itch.io](https://itch.io/games/tag-nes) - 無料ゲーム多数
+- [nestest.nes](https://www.nesdev.org/wiki/Emulator_tests) - CPUテスト用ROM (エミュレーター動作確認に最適)
+
+### カートリッジ吸い出し
+
+自分が所有するファミコン/NESカートリッジから専用機器でROMデータをダンプできます。
+
 ## ベースプロジェクト
 
 - [fogleman/nes](https://github.com/fogleman/nes) - NES emulator written in Go
