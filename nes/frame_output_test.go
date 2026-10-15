@@ -63,23 +63,27 @@ func assertOutputStateEqual(t *testing.T, normal, skipped *Console) {
 func TestFrameOutputPreservesExecution(t *testing.T) {
 	for name, mapper := range map[string]byte{"NROM": 0, "MMC1": 1, "UxROM": 2, "CNROM": 3, "MMC3": 4, "AxROM": 7, "Mapper40": 40, "Mapper225": 225} {
 		t.Run(name, func(t *testing.T) {
-			normal, skipped := outputTestConsole(t, mapper), outputTestConsole(t, mapper)
-			for frame := 0; frame < 4; frame++ {
-				render := frame&1 != 0
-				skipped.SetFrameOutput(render)
-				before := *skipped.Buffer()
-				cycles := normal.StepFrame()
-				if got := skipped.StepFrame(); got != cycles {
-					t.Fatalf("CPU cycles = %d, want %d", got, cycles)
-				}
-				assertOutputStateEqual(t, normal, skipped)
-				if render {
-					if *normal.Buffer() != *skipped.Buffer() {
-						t.Fatal("next displayed frame differs")
+			for name, interval := range map[string]int{"every2": 2, "every4": 4} {
+				t.Run(name, func(t *testing.T) {
+					normal, skipped := outputTestConsole(t, mapper), outputTestConsole(t, mapper)
+					for frame := 1; frame <= interval*2; frame++ {
+						render := frame%interval == 0
+						skipped.SetFrameOutput(render)
+						before := *skipped.Buffer()
+						cycles := normal.StepFrame()
+						if got := skipped.StepFrame(); got != cycles {
+							t.Fatalf("CPU cycles = %d, want %d", got, cycles)
+						}
+						assertOutputStateEqual(t, normal, skipped)
+						if render {
+							if *normal.Buffer() != *skipped.Buffer() {
+								t.Fatal("next displayed frame differs")
+							}
+						} else if *skipped.Buffer() != before {
+							t.Fatal("skipped frame wrote pixels")
+						}
 					}
-				} else if *skipped.Buffer() != before {
-					t.Fatal("skipped frame wrote pixels")
-				}
+				})
 			}
 		})
 	}

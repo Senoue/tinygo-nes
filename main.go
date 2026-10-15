@@ -19,7 +19,7 @@ func main() {
 
 	InitAudio()
 
-	// Generate and transfer pixels every other frame in 24-line RGB565 batches.
+	// Generate and transfer selected frames in 24-line RGB565 batches.
 	const batchLines = 24
 	const nesW = 256
 	const offsetX = 32
@@ -33,7 +33,7 @@ func main() {
 		HandleAudioInput(buttons[nes.ButtonSelect])
 		console.SetButtons1(buttons)
 		frameCount++
-		renderFrame := frameCount&1 == 0
+		renderFrame := frameCount%displayFrameInterval == 0
 		console.SetFrameOutput(renderFrame)
 		started := performanceNow()
 		perf.stepFrame(console, renderFrame)
