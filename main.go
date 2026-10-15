@@ -7,51 +7,17 @@ import (
 )
 
 // Place your .nes ROM file in roms/ and update the path below.
+//
 //go:embed roms/game.nes
 var romData string
 
 func main() {
-	d := romData
-	numPRG := d[4]
-	numCHR := d[5]
-	ctrl1 := d[6]
-	ctrl2 := d[7]
-	mapperNum := (ctrl1 >> 4) | (ctrl2>>4)<<4
-	mirror := (ctrl1 & 1) | ((ctrl1>>3)&1)<<1
-	battery := (ctrl1 >> 1) & 1
-	offset := 16
-
-	prgSize := int(numPRG) * 16384
-	chrSize := int(numCHR) * 8192
-
-	prg := make([]byte, prgSize)
-	copy(prg, d[offset:offset+prgSize])
-	offset += prgSize
-
-	chr := make([]byte, chrSize)
-	copy(chr, d[offset:offset+chrSize])
-
-	cartridge := nes.NewCartridge(prg, chr, mapperNum, mirror, battery)
-	ram := make([]byte, 2048)
-	console := &nes.Console{
-		Cartridge:   cartridge,
-		Controller1: nes.NewController(),
-		Controller2: nes.NewController(),
-		RAM:         ram,
+	console, err := NewConsoleFromString(romData)
+	if err != nil {
+		panic(err.Error())
 	}
 
-	mapper, _ := nes.NewMapper(console)
-	console.Mapper = mapper
-	console.CPU = nes.NewCPUNoReset(console)
-	console.APU = nes.NewAPU(console)
-	console.PPU = nes.NewPPU(console)
-
-	// Manual CPU reset (bypass interface)
-	console.CPU.PC = uint16(prg[len(prg)-3])<<8 | uint16(prg[len(prg)-4])
-	console.CPU.SP = 0xFD
-	console.CPU.SetFlags(0x24)
-
-	// Emulation loop - render every frame, 256px wide, 16-line batches
+	// Transfer every other frame in 24-line RGB565 batches.
 	const batchLines = 24
 	const nesW = 256
 	const offsetX = 32
@@ -89,4 +55,3 @@ func main() {
 		}
 	}
 }
-

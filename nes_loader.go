@@ -23,8 +23,15 @@ func NewConsoleFromString(data string) (*nes.Console, error) {
 	control1 := data[6]
 	control2 := data[7]
 
+	if control2&0x0c == 0x08 {
+		return nil, errors.New("NES 2.0 ROMs are not supported")
+	}
+	if numPRG == 0 {
+		return nil, errors.New("ROM has no PRG data")
+	}
+
 	mapper := (control1 >> 4) | (control2>>4)<<4
-	mirror := (control1 & 1) | ((control1 >> 3) & 1 << 1)
+	mirror := (control1 & 1) | (((control1 >> 3) & 1) << 1)
 	battery := (control1 >> 1) & 1
 
 	offset := 16
@@ -38,7 +45,6 @@ func NewConsoleFromString(data string) (*nes.Console, error) {
 	if len(data) < offset+prgSize+chrSize {
 		return nil, errors.New("ROM data truncated")
 	}
-
 
 	prg := make([]byte, prgSize)
 	copy(prg, data[offset:offset+prgSize])

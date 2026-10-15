@@ -12,6 +12,18 @@ type Mapper interface {
 
 func NewMapper(console *Console) (Mapper, error) {
 	cartridge := console.Cartridge
+	if len(cartridge.PRG) == 0 || len(cartridge.PRG)%0x4000 != 0 {
+		return nil, errors.New("invalid PRG size")
+	}
+	if len(cartridge.CHR) < 0x2000 || len(cartridge.CHR)%0x2000 != 0 {
+		return nil, errors.New("invalid CHR size")
+	}
+	if cartridge.Mapper == 7 && len(cartridge.PRG)%0x8000 != 0 {
+		return nil, errors.New("mapper 7 requires 32KB PRG banks")
+	}
+	if cartridge.Mapper == 40 && len(cartridge.PRG) < 0x10000 {
+		return nil, errors.New("mapper 40 requires at least 64KB PRG")
+	}
 	switch cartridge.Mapper {
 	case 0:
 		return NewMapper2(cartridge), nil
