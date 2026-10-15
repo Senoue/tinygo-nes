@@ -145,9 +145,27 @@ func NewCPUNoReset(console *Console) *CPU {
 }
 
 func (cpu *CPU) Read(address uint16) byte {
+	// RAM and cartridge reads dominate instruction execution. Keep device
+	// register decoding out of that path, including instruction fetches.
+	if address < 0x2000 {
+		return cpu.console.RAM[address&0x07ff]
+	}
+	if address >= 0x6000 {
+		// Common discrete mappers can decode CPU memory without a virtual
+		// call or a CHR address check. Keep other mappers on their own path.
+		switch m := cpu.console.Mapper.(type) {
+		case *Mapper2: // Mapper 0 also uses Mapper2.
+			return m.readCPU(address)
+		case *Mapper3:
+			return m.readCPU(address)
+		}
+		return cpu.console.Mapper.Read(address)
+	}
+	return cpu.readIO(address)
+}
+
+func (cpu *CPU) readIO(address uint16) byte {
 	switch {
-	case address < 0x2000:
-		return cpu.console.RAM[address%0x0800]
 	case address < 0x4000:
 		return cpu.console.PPU.readRegister(0x2000 + address%8)
 	case address == 0x4014:
@@ -158,10 +176,6 @@ func (cpu *CPU) Read(address uint16) byte {
 		return cpu.console.Controller1.Read()
 	case address == 0x4017:
 		return cpu.console.Controller2.Read()
-	case address < 0x6000:
-		// TODO: I/O registers
-	case address >= 0x6000:
-		return cpu.console.Mapper.Read(address)
 	default:
 		return 0
 	}
@@ -169,9 +183,19 @@ func (cpu *CPU) Read(address uint16) byte {
 }
 
 func (cpu *CPU) Write(address uint16, value byte) {
+	if address < 0x2000 {
+		cpu.console.RAM[address&0x07ff] = value
+		return
+	}
+	if address >= 0x6000 {
+		cpu.console.Mapper.Write(address, value)
+		return
+	}
+	cpu.writeIO(address, value)
+}
+
+func (cpu *CPU) writeIO(address uint16, value byte) {
 	switch {
-	case address < 0x2000:
-		cpu.console.RAM[address%0x0800] = value
 	case address < 0x4000:
 		cpu.console.PPU.writeRegister(0x2000+address%8, value)
 	case address < 0x4014:
@@ -185,10 +209,6 @@ func (cpu *CPU) Write(address uint16, value byte) {
 		cpu.console.Controller2.Write(value)
 	case address == 0x4017:
 		cpu.console.APU.writeRegister(address, value)
-	case address < 0x6000:
-		// TODO: I/O registers
-	case address >= 0x6000:
-		cpu.console.Mapper.Write(address, value)
 	default:
 		return
 	}
@@ -245,14 +265,20 @@ func (cpu *CPU) read16bug(address uint16) uint16 {
 
 // push pushes a byte onto the stack
 func (cpu *CPU) push(value byte) {
-	cpu.Write(0x100|uint16(cpu.SP), value)
+	cpu.console.RAM[0x100|uint16(cpu.SP)] = value
 	cpu.SP--
 }
 
 // pull pops a byte from the stack
 func (cpu *CPU) pull() byte {
 	cpu.SP++
-	return cpu.Read(0x100 | uint16(cpu.SP))
+	return cpu.console.RAM[0x100|uint16(cpu.SP)]
+}
+
+// Zero-page pointers always read internal RAM and wrap from $FF to $00.
+func (cpu *CPU) read16ZeroPage(address byte) uint16 {
+	ram := cpu.console.RAM
+	return uint16(ram[address]) | uint16(ram[address+1])<<8
 }
 
 // push16 pushes two bytes onto the stack
@@ -382,11 +408,11 @@ func (cpu *CPU) Step() int {
 	case modeImplied:
 		address = 0
 	case modeIndexedIndirect:
-		address = cpu.read16bug(uint16(cpu.Read(cpu.PC+1) + cpu.X))
+		address = cpu.read16ZeroPage(cpu.Read(cpu.PC+1) + cpu.X)
 	case modeIndirect:
 		address = cpu.read16bug(cpu.Read16(cpu.PC + 1))
 	case modeIndirectIndexed:
-		address = cpu.read16bug(uint16(cpu.Read(cpu.PC+1))) + uint16(cpu.Y)
+		address = cpu.read16ZeroPage(cpu.Read(cpu.PC+1)) + uint16(cpu.Y)
 		pageCrossed = pagesDiffer(address-uint16(cpu.Y), address)
 	case modeRelative:
 		offset := uint16(cpu.Read(cpu.PC + 1))

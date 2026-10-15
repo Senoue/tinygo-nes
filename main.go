@@ -30,7 +30,7 @@ func main() {
 	frameCount := byte(0)
 	for {
 		buttons := GetPressedButtons()
-		HandleAudioInput(buttons[nes.ButtonStart])
+		HandleAudioInput(buttons[nes.ButtonSelect])
 		console.SetButtons1(buttons)
 		frameCount++
 		renderFrame := frameCount&1 == 0

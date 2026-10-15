@@ -10,12 +10,12 @@ import (
 )
 
 var (
-	buzzerPWM       = machine.TCC0 // WIO_BUZZER/PD11 maps to TCC0 channel 4.
-	buzzerChannel   uint8
-	buzzerFrequency uint32
-	buzzerVolume    byte
-	buzzerMuted     bool
-	buzzerStartHeld bool
+	buzzerPWM        = machine.TCC0 // WIO_BUZZER/PD11 maps to TCC0 channel 4.
+	buzzerChannel    uint8
+	buzzerFrequency  uint32
+	buzzerVolume     byte
+	buzzerMuted      bool
+	buzzerSelectHeld bool
 )
 
 func InitAudio() {
@@ -52,9 +52,9 @@ func OutputAudio(apu *nes.APU) {
 	setBuzzerTone(apu.BuzzerTone())
 }
 
-// HandleAudioInput toggles only on a new press; holding Start keeps the state.
-func HandleAudioInput(startPressed bool) {
-	if startPressed && !buzzerStartHeld {
+// HandleAudioInput toggles only on a new press; holding Select keeps the state.
+func HandleAudioInput(selectPressed bool) {
+	if selectPressed && !buzzerSelectHeld {
 		buzzerMuted = !buzzerMuted
 		if buzzerMuted {
 			setBuzzerTone(nes.BuzzerTone{})
@@ -63,7 +63,7 @@ func HandleAudioInput(startPressed bool) {
 			println("audio: unmuted")
 		}
 	}
-	buzzerStartHeld = startPressed
+	buzzerSelectHeld = selectPressed
 }
 
 func setBuzzerTone(tone nes.BuzzerTone) {

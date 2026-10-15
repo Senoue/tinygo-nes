@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func outputTestConsole(t *testing.T, mapper byte) *Console {
+func outputTestConsole(t testing.TB, mapper byte) *Console {
 	t.Helper()
 	prg := make([]byte, 65536)
 	for bank := 0; bank < len(prg); bank += 8192 {

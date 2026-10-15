@@ -759,23 +759,34 @@ func (ppu *PPU) RenderScanline() {
 	}
 }
 
+// Spread four pattern bits into alternating positions of a packed 2-bit row.
+var backgroundBitPairs = [16]byte{0, 1, 4, 5, 16, 17, 20, 21, 64, 65, 68, 69, 80, 81, 84, 85}
+
 // renderScanlineBackground renders all 256 background pixels for a scanline.
 func (ppu *PPU) renderScanlineBackground(scanline int) {
+	line := ppu.front[scanline*256 : (scanline+1)*256]
 	if ppu.flagShowBackground == 0 {
 		// Fill with background color
 		bgColor := ppu.readPalette(0) % 64
 		for x := 0; x < 256; x++ {
 			ppu.backgroundColors[x] = 0
-			ppu.front[scanline*256+x] = bgColor
+			line[x] = bgColor
 		}
 		return
 	}
 
 	fineY := (ppu.v >> 12) & 7
 	table := uint16(ppu.flagBackgroundTable)
+	// CPU writes cannot interleave with this scanline. Resolve palette values
+	// once; all transparent pattern values use the universal background.
+	var palette [16]byte
+	for i := range palette {
+		palette[i] = ppu.paletteData[i] & 63
+	}
+	palette[4], palette[8], palette[12] = palette[0], palette[0], palette[0]
 
 	// We need to render 256 pixels. Due to fine X scroll, we may need 33 tiles.
-	// Save v so we can restore coarse X iteration state properly.
+	// Fine X clips the first tile; the last tile may also be partial.
 	fineX := ppu.x
 	pixelX := 0
 
@@ -792,20 +803,23 @@ func (ppu *PPU) renderScanlineBackground(scanline int) {
 		lowByte := ppu.Read(patAddr)
 		highByte := ppu.Read(patAddr + 8)
 
-		// Render pixels from this tile
-		startBit := int(fineX)
-		for bit := startBit; bit < 8 && pixelX < 256; bit++ {
-			shift := uint(7 - bit)
-			p1 := (lowByte >> shift) & 1
-			p2 := (highByte >> shift) & 1
-			color := attribute | p2<<1 | p1
-
-			if color&3 == 0 || (pixelX < 8 && ppu.flagShowLeftBackground == 0) {
+		// Decode a tile row once, then consume two bits per pixel. The tiny
+		// nibble table avoids two variable bit extractions for every pixel.
+		low := uint16(backgroundBitPairs[lowByte>>4])<<8 | uint16(backgroundBitPairs[lowByte&15])
+		high := uint16(backgroundBitPairs[highByte>>4])<<8 | uint16(backgroundBitPairs[highByte&15])
+		pattern := (low | high<<1) << (fineX * 2)
+		end := pixelX + 8 - int(fineX)
+		if end > 256 {
+			end = 256
+		}
+		for pixelX < end {
+			color := byte(pattern>>14) | attribute
+			pattern <<= 2
+			line[pixelX] = palette[color]
+			if color&3 == 0 {
 				color = 0
 			}
-
 			ppu.backgroundColors[pixelX] = color
-			ppu.front[scanline*256+pixelX] = ppu.readPalette(uint16(color)) % 64
 			pixelX++
 		}
 
@@ -814,6 +828,13 @@ func (ppu *PPU) renderScanlineBackground(scanline int) {
 
 		// Increment coarse X in v
 		ppu.incrementX()
+	}
+	// Clipping affects only the first eight pixels; keep it out of the hot loop.
+	if ppu.flagShowLeftBackground == 0 {
+		for x := 0; x < 8; x++ {
+			ppu.backgroundColors[x] = 0
+			line[x] = palette[0]
+		}
 	}
 }
 
