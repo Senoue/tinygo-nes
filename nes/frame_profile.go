@@ -35,9 +35,7 @@ func (console *Console) ProfileFrame() FrameProfile {
 			c := console.CPU.Step()
 			scanlineCycles += c
 			p.CPUCycles += c
-			for i := 0; i < c; i++ {
-				console.APU.Step()
-			}
+			console.APU.StepCycles(c)
 		}
 		p.CPUAPU += time.Since(t)
 

@@ -17,6 +17,8 @@ func main() {
 		panic(err.Error())
 	}
 
+	InitAudio()
+
 	// Generate and transfer pixels every other frame in 24-line RGB565 batches.
 	const batchLines = 24
 	const nesW = 256
@@ -28,6 +30,7 @@ func main() {
 	frameCount := byte(0)
 	for {
 		buttons := GetPressedButtons()
+		HandleAudioInput(buttons[nes.ButtonStart])
 		console.SetButtons1(buttons)
 		frameCount++
 		renderFrame := frameCount&1 == 0
@@ -36,7 +39,7 @@ func main() {
 		perf.stepFrame(console, renderFrame)
 		perf.recordEmulation(started)
 
-		OutputAudio(console.APU.Output())
+		OutputAudio(console.APU)
 
 		if !renderFrame {
 			perf.finishFrame(false)

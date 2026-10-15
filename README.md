@@ -50,6 +50,64 @@ tinygo build -target=wioterminal \
 
 4. Wio Terminal をブートローダーモードにして `tinygo-nes.uf2` をドラッグ&ドロップ
 
+## 内蔵ブザーでBGMの旋律を試す
+
+`buzzer` タグ付きビルドでは、Wio Terminalの内蔵ブザー（`WIO_BUZZER` / PD11）をTCC0のPWMで駆動します。
+内蔵ブザーはPWMで発音するパッシブ型です（[Seeed公式資料](https://wiki.seeedstudio.com/Wio-Terminal-Buzzer/)）。
+従来のDACへの1フレーム1回の書き込みを置き換え、PWMがエミュレーションや画面転送の間も音程を維持します。
+
+```bash
+PATH="/opt/homebrew/opt/go/bin:$PATH" \
+GOROOT=/opt/homebrew/opt/go/libexec GOTOOLCHAIN=local \
+tinygo build -target=wioterminal -tags=buzzer,perf \
+  -gc=conservative -opt=2 -stack-size=16KB \
+  -scheduler=none -panic=trap -nobounds \
+  -o tinygo-nes-buzzer.uf2 .
+```
+
+1. `tinygo-nes-buzzer.uf2` をブートローダーモードのWio Terminalへコピー。
+2. 起動時に短い確認音が2音鳴ることを確認（約523Hz → 約784Hz）。
+3. ゲームを開始し、BGMの鳴る場面へ進む。`tinygo monitor` では音声有効の起動メッセージと性能ログを確認可能。
+
+`buzzer` ビルドでは、**Start（右上のBUTTON_3）を押すたびに消音／解除**を切り替えます。
+長押し中は1回だけ切り替わります。ゲーム側にもStart入力が届くため、ゲーム開始やポーズ操作と同時に音声も切り替わります。
+消音中もAPUと曲の進行は続き、解除するとその時点の音から再開します。再起動すると音声は有効に戻ります。
+`tinygo monitor` には `audio: muted` / `audio: unmuted` を表示します。
+
+APUのパルス音源1を優先し、無音ならパルス音源2、それも無音なら三角波の音程を使います。
+音量・発音可否は有効フラグ、長さカウンター、エンベロープなどから判断し、波形の瞬間値では判断しません。
+音程と音量は各エミュレーションフレーム後に更新します。PWMの最大High幅は周期の1/8に抑えています。
+
+これは**単音の試験出力**です。和音、元のデューティ比・音色、ノイズ、DMC/PCMは再現しません。
+三角波もブザー用の矩形波に置き換わります。ゲーム速度が約13FPSの場合、曲の進行も通常より遅くなり、
+短い音やフレーム途中の音量変化は取りこぼす場合があります。音程自体はPWMで設定した周波数です。
+高い音、低い音、音量によって内蔵ブザーでの聞こえ方は異なります。
+起動音だけ鳴ってゲーム音が出ない場合は、BGM開始後かどうかとROM側の音源使用状況を確認します。
+
+`buzzer` タグを外すと音声処理は無効です。外付けDAC、外部スピーカー、PCの音声出力は今回の対象外です。
+音声用の割り込みやgoroutineは追加していません。実装は `audio_buzzer.go` と `nes/buzzer.go`、
+無効時の処理は `audio_silent.go`。音程・休符・音源選択と、APU状態を変更しないことをテストしています。
+実機では起動確認音と、下記の修正後のドラクエのBGMの発音を確認済みです。処理速度に伴うテンポの遅さは残っています。
+
+### ドラクエでBGMが無音だった問題の修正
+
+起動音は鳴る一方、タイトル・ゲーム開始後のBGMが鳴らない状態を調査しました。
+APUの `$4015` 読み出しにフレームIRQの状態ビット（bit 6）がなく、CPUが割り込みを禁止している間は
+フレームIRQ要求も失われていました。手元のROMをホストで実行すると、音源の初期化後に音程・音量の設定が進まず、発音データが出ない状態を再現しました。
+
+- フレームIRQを `frameIRQPending` に保持し、CPUのIフラグに関係なく状態を記録。
+- `$4015` 読み出しでbit 6を返し、その読み出しでフレームIRQをクリア。
+- `$4017` のIRQ禁止指定で保持しているフレームIRQをクリア。
+- CPUの割り込み禁止解除後に保留中のAPU IRQを処理。NMIを優先し、IRQハンドラーへの移行だけではAPU側の要求をクリアしない。
+
+レジスタの確認仕様は [NESdevのAPU Status](https://www.nesdev.org/wiki/APU_Status) を参照。
+修正後のホスト実行では、タイトル相当の区間で392Hz・440Hz、Start入力後の区間で658Hzなどの発音データを確認しました。
+修正後、実機でもBGMが聞こえることを確認しました。
+
+`nes/apu_irq_test.go` にはIRQ状態の保持・読み出しクリア・禁止・NMI優先のテストと、
+CPUのIRQを禁止したまま `$4015` をポーリングし、440Hzの音程を設定する自作プログラムの回帰テストを追加しました。
+ROMを使った一時的な調査コードは削除し、リポジトリのテストはROMなしで実行できます。
+
 ## 処理時間の計測
 
 通常ビルドでは計測しません。上記のビルドコマンドに `-tags=perf` を追加すると、
@@ -158,7 +216,7 @@ PPU時間は各区間で抽出したフレームの測定値であり、全フ�
 - Sprite 0、左端マスク、画面右端、スクロールとネームテーブル境界、スプライト優先度、描画無効時の画面をテスト。
 - 計測あり／なしのWio Terminal向けビルドが成功。Homebrew版Goを1.27.2へ更新し、READMEのビルド手順も更新。
 - ゲーム操作・スクロール・表示の実機での継続確認は未完了。音声の周期的な出力処理は未対応。
-- 次の主な改善候補はCPU＋APU（実機で約50ms／フレーム）。今回、CPU命令実行とAPUの処理方式自体は変更していない。
+- この段階で残った主な負荷はCPU＋APU（実機で約50ms／フレーム）。描画省略の実装時点では、CPU命令実行とAPUの処理方式自体は変更していない。
 - 下記スペックのメモリ数値は以前の概算であり、今回の変更後の使用量は再計測していない。
 
 再確認用コマンド（ROMやGUIは不要）:
@@ -168,6 +226,50 @@ go test nes_loader.go nes_loader_test.go
 go test ./nes
 go test -tags=perf ./nes
 go test -tags=perf performance_enabled.go performance_test.go
+```
+
+### 追加改善：APUタイマーのまとめ処理
+
+CPU＋APUの負荷を減らすため、CPU命令1回分のサイクルを `APU.StepCycles()` でまとめて進める処理を追加しました。
+CPU命令の実行順序やレジスタ書き込みのタイミングは変更せず、命令と命令の間でAPUを進めます。
+
+- Pulse / Triangleのタイマーは残り時間と期限到達回数を計算し、毎サイクルの確認を削減。
+- Noiseは期限に達した回数だけシフトレジスターを更新。
+- DMCは読み出し・シフト・CPU停止の順序を維持し、イベントのないカウントダウンをまとめて減算。
+- APUフレームカウンターの境界で処理を分割し、エンベロープ・長さカウンター・スイープ・IRQの更新順序を維持。
+- 通常実行と詳細計測の双方に適用。従来の `APU.Step()` を比較用として残し、差分テストで挙動を検証。
+
+変更箇所は `nes/apu_batch.go`、`nes/console.go`、`nes/frame_profile.go`。
+テストは `nes/apu_batch_test.go` に追加しました。ランダムなレジスタ書き込み、ゼロ／最大タイマー値、
+APUサイクルカウンターの周回、複数のフレームカウンター境界、DMCのアドレス周回・ループ・CPU停止、
+実際にAPUレジスタを書き換える自作プログラムを含め、従来処理との状態・出力一致を確認しています。
+これは既存APU実装との同等性確認であり、NES実機との音声精度を新たに保証するものではありません。
+
+Apple M1上のGoベンチマーク（CPU命令相当の2〜7サイクル／呼び出し、各0.5秒）:
+
+| APU条件 | 従来のサイクル処理 | まとめ処理 |
+|---|---:|---:|
+| 初期状態 | 16.45ns/op | 9.20ns/op |
+| 音源タイマー設定あり | 16.01ns/op | 7.08ns/op |
+| DMC有効 | 19.97ns/op | 10.32ns/op |
+
+この数値はホスト上のAPU単体の比較です。追加で提供されたWio Terminalのログでは、次の小幅な改善が見られました。
+
+| 指標 | APUまとめ処理前 | まとめ処理後 |
+|---|---:|---:|
+| 120フレームの経過時間（提供された全体ログ各1区間） | 9,633ms | 9,484ms |
+| 実行FPS（経過時間から算出） | 約12.46 | 約12.65 |
+| CPU＋APU（詳細サンプル各4件の平均） | 約49.83ms | 約48.71ms |
+| 本体平均・詳細計測を除く（各2区間） | 64.92〜65.66ms | 63.69〜64.35ms |
+
+実行速度の差は約1.6%、CPU＋APUの時間差は約2.3%でした。
+PC上でのAPU単体の改善率が、そのまま実機全体の改善率になるわけではありません。
+提供区間数は少なく、場面差や計測の揺れも含むため、改善の再現性は追加計測で確認します。
+計測ログの形式は変更していません。音声の周期的なDAC出力は引き続き未対応です。
+
+```bash
+go test ./nes -run 'Test(APUBatch|AdvanceTimer)'
+go test ./nes -run '^$' -bench=BenchmarkAPUStepCycles -benchtime=500ms
 ```
 
 ## スペック
@@ -181,7 +283,7 @@ go test -tags=perf performance_enabled.go performance_test.go
 | PPU | スキャンラインレンダラー |
 | 描画 | 256x240, RGB565, 24行バッチ |
 | SPI | 80MHz |
-| 音声 | DAC出力 (実験的) |
+| 音声 | 内蔵ブザーの単音PWM出力（`buzzer` タグ、実験的） |
 
 ## 技術的な工夫
 
@@ -198,12 +300,15 @@ go test -tags=perf performance_enabled.go performance_test.go
 ```
 main.go          - エントリポイント、ROM読込、エミュレーションループ
 nes_loader.go    - iNESフォーマットパーサー
-wioterminal.go   - Wio Terminal固有 (ILI9341, ボタン, DAC)
+wioterminal.go   - Wio Terminal固有 (ILI9341, ボタン)
+audio_buzzer.go  - 内蔵ブザーのPWM出力（buzzerタグ）
+audio_silent.go  - 音声無効時の処理
 generic.go       - PC用ビルド (tinydisplay)
 nes/             - NESエミュレーターコア (fogleman/nes フォーク)
   cpu.go         - 6502 CPU (256-case switch)
   ppu.go         - PPU (スキャンラインレンダラー)
   apu.go         - APU (フレームカウンター + IRQ)
+  buzzer.go      - APU状態からブザー用の音程・音量を取得
   console.go     - Console (スキャンラインベースStepFrame)
   mapper*.go     - カートリッジマッパー
   palette.go     - NESパレット (RGBA + RGB565)

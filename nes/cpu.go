@@ -134,13 +134,13 @@ type CPU struct {
 }
 
 func NewCPU(console *Console) *CPU {
-	cpu := CPU{console: console}
+	cpu := CPU{console: console, interrupt: interruptNone}
 	cpu.Reset()
 	return &cpu
 }
 
 func NewCPUNoReset(console *Console) *CPU {
-	cpu := CPU{console: console}
+	cpu := CPU{console: console, interrupt: interruptNone}
 	return &cpu
 }
 
@@ -348,6 +348,11 @@ func (cpu *CPU) Step() int {
 
 	cycles := cpu.Cycles
 
+	// The APU frame IRQ remains asserted until $4015 is read or $4017
+	// inhibits it. CPU interrupt masking must not discard that request.
+	if cpu.interrupt == interruptNone && cpu.I == 0 && cpu.console.APU != nil && cpu.console.APU.frameIRQPending {
+		cpu.interrupt = interruptIRQ
+	}
 	switch cpu.interrupt {
 	case interruptNMI:
 		cpu.nmi()
