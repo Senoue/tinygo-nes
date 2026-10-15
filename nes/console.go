@@ -104,6 +104,12 @@ func (console *Console) StepSeconds(seconds float64) {
 	}
 }
 
+// SetFrameOutput controls pixel generation only; CPU/APU, PPU timing and
+// status flags continue to advance. Re-enable before a frame that is displayed.
+func (console *Console) SetFrameOutput(enabled bool) {
+	console.PPU.skipPixels = !enabled
+}
+
 func (console *Console) Buffer() *[256 * 240]byte {
 	return console.PPU.front
 }

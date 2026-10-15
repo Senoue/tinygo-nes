@@ -15,6 +15,10 @@ type PPU struct {
 	oamData       [256]byte
 	front         *[256 * 240]byte // single buffer (front == back)
 
+	// Output-only state; it does not affect emulated registers or timing.
+	skipPixels       bool
+	backgroundColors [256]byte // uncomposited palette addresses for one scanline
+
 	// PPU registers
 	v uint16 // current vram address (15 bit)
 	t uint16 // temporary vram address (15 bit)
@@ -491,6 +495,9 @@ func (ppu *PPU) renderPixel() {
 			color = background
 		}
 	}
+	if ppu.skipPixels {
+		return
+	}
 	ppu.front[y*256+x] = ppu.readPalette(uint16(color)) % 64
 }
 
@@ -697,15 +704,19 @@ func (ppu *PPU) RenderScanline() {
 			// Evaluate sprites for this scanline
 			ppu.evaluateSprites()
 
-			// Render 256 background pixels
-			ppu.renderScanlineBackground(scanline)
-
-			// Overlay sprites
-			ppu.renderScanlineSprites(scanline)
+			if ppu.skipPixels {
+				ppu.skipScanlinePixels()
+			} else {
+				ppu.renderScanlineBackground(scanline)
+				ppu.renderScanlineSprites(scanline)
+			}
 
 			// End of scanline: increment Y and copy X
 			ppu.incrementY()
 			ppu.copyX()
+		} else if !ppu.skipPixels {
+			// Fully disabled rendering still displays the universal background.
+			ppu.renderScanlineBackground(scanline)
 		}
 
 		// Set Cycle to 280 for mapper4 compatibility (it checks Cycle==280)
@@ -754,6 +765,7 @@ func (ppu *PPU) renderScanlineBackground(scanline int) {
 		// Fill with background color
 		bgColor := ppu.readPalette(0) % 64
 		for x := 0; x < 256; x++ {
+			ppu.backgroundColors[x] = 0
 			ppu.front[scanline*256+x] = bgColor
 		}
 		return
@@ -788,10 +800,11 @@ func (ppu *PPU) renderScanlineBackground(scanline int) {
 			p2 := (highByte >> shift) & 1
 			color := attribute | p2<<1 | p1
 
-			if pixelX < 8 && ppu.flagShowLeftBackground == 0 {
+			if color&3 == 0 || (pixelX < 8 && ppu.flagShowLeftBackground == 0) {
 				color = 0
 			}
 
+			ppu.backgroundColors[pixelX] = color
 			ppu.front[scanline*256+pixelX] = ppu.readPalette(uint16(color)) % 64
 			pixelX++
 		}
@@ -836,17 +849,10 @@ func (ppu *PPU) renderScanlineSprites(scanline int) {
 				continue
 			}
 
-			// Read existing background pixel to determine bg/sprite compositing
-			bgPaletteIdx := ppu.front[scanline*256+px]
-			bgColor := byte(0)
-			// Check if the background pixel is non-transparent
-			// We need to check the original background color index, not the palette result.
-			// Re-derive: if bgPaletteIdx == readPalette(0)%64, it's background color (transparent bg)
-			bgIsTransparent := (bgPaletteIdx == ppu.readPalette(0)%64)
-
-			if !bgIsTransparent {
-				bgColor = 1 // non-zero means bg pixel is opaque
-			}
+			// Transparency is determined by pattern bits, independent of palette
+			// colors and any higher-index sprites already drawn at this pixel.
+			background := ppu.backgroundColors[px]
+			bgColor := background & 3
 
 			// Sprite 0 hit detection
 			if spriteIdx == 0 && bgColor != 0 && px < 255 {
@@ -856,7 +862,56 @@ func (ppu *PPU) renderScanlineSprites(scanline int) {
 			// Priority: 0 = sprite in front of bg, 1 = sprite behind bg
 			if priority == 0 || bgColor == 0 {
 				ppu.front[scanline*256+px] = ppu.readPalette(uint16(spriteColor)|0x10) % 64
+			} else {
+				// A lower-index sprite behind the background also hides higher-index sprites.
+				ppu.front[scanline*256+px] = ppu.readPalette(uint16(background)) % 64
 			}
+		}
+	}
+}
+
+// skipScanlinePixels keeps sprite-zero detection and the horizontal address
+// progression, without producing colors or writing the framebuffer. Supported
+// mappers have side-effect-free CHR reads; sprite evaluation still runs normally.
+func (ppu *PPU) skipScanlinePixels() {
+	if ppu.flagSpriteZeroHit == 0 && ppu.flagShowBackground != 0 && ppu.flagShowSprites != 0 &&
+		ppu.spriteCount > 0 && ppu.spriteIndexes[0] == 0 {
+		pattern := ppu.spritePatterns[0]
+		x := int(ppu.spritePositions[0])
+		cachedTile := -1
+		var opaque byte
+		for j := 0; j < 8 && x+j < 255; j++ {
+			px := x + j
+			if px < 8 && (ppu.flagShowLeftBackground == 0 || ppu.flagShowLeftSprites == 0) {
+				continue
+			}
+			if (pattern>>uint((7-j)*4))&3 == 0 {
+				continue
+			}
+			pixel := int(ppu.x) + px
+			tile := pixel >> 3
+			if tile != cachedTile {
+				// Advance coarse X locally, including horizontal nametable wrap.
+				coarse := int(ppu.v&31) + tile
+				v := (ppu.v &^ 0x041f) | uint16(coarse&31) | ((ppu.v & 0x0400) ^ uint16(coarse&32)<<5)
+				name := ppu.Read(0x2000 | (v & 0x0fff))
+				address := uint16(ppu.flagBackgroundTable)*0x1000 + uint16(name)*16 + ((v >> 12) & 7)
+				opaque = ppu.Read(address) | ppu.Read(address+8)
+				cachedTile = tile
+			}
+			if opaque&(0x80>>uint(pixel&7)) != 0 {
+				ppu.flagSpriteZeroHit = 1
+				break
+			}
+		}
+	}
+	if ppu.flagShowBackground != 0 {
+		tiles := 32
+		if ppu.x != 0 {
+			tiles++
+		}
+		for i := 0; i < tiles; i++ {
+			ppu.incrementX()
 		}
 	}
 }

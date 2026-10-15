@@ -17,30 +17,39 @@ func main() {
 		panic(err.Error())
 	}
 
-	// Transfer every other frame in 24-line RGB565 batches.
+	// Generate and transfer pixels every other frame in 24-line RGB565 batches.
 	const batchLines = 24
 	const nesW = 256
 	const offsetX = 32
 	var batchBuf [nesW * 2 * batchLines]byte
 
+	var perf performanceStats
+	perf.startWindow()
 	frameCount := byte(0)
 	for {
 		buttons := GetPressedButtons()
 		console.SetButtons1(buttons)
-		console.StepFrame()
 		frameCount++
+		renderFrame := frameCount&1 == 0
+		console.SetFrameOutput(renderFrame)
+		started := performanceNow()
+		perf.stepFrame(console, renderFrame)
+		perf.recordEmulation(started)
 
 		OutputAudio(console.APU.Output())
 
-		if frameCount&1 != 0 {
+		if !renderFrame {
+			perf.finishFrame(false)
 			continue
 		}
 
 		buf := console.Buffer()
 		if buf == nil {
+			perf.finishFrame(false)
 			continue
 		}
 		for yBatch := 0; yBatch < 240; yBatch += batchLines {
+			started = performanceNow()
 			for row := 0; row < batchLines; row++ {
 				y := yBatch + row
 				lineOff := row * nesW * 2
@@ -51,7 +60,11 @@ func main() {
 					lineOff += 2
 				}
 			}
+			perf.recordConversion(started)
+			started = performanceNow()
 			display.DrawRGBBitmap8(int16(offsetX), int16(yBatch), batchBuf[:], nesW, batchLines)
+			perf.recordTransfer(started)
 		}
+		perf.finishFrame(true)
 	}
 }
