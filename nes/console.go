@@ -64,7 +64,7 @@ func (console *Console) Step() int {
 			console.Mapper.Step()
 		}
 	}
-	console.APU.StepCycles(cpuCycles)
+	console.APU.stepForConsole(cpuCycles)
 	return cpuCycles
 }
 
@@ -85,7 +85,7 @@ func (console *Console) StepFrame() int {
 			c := console.CPU.Step()
 			scanlineCycles += c
 			cpuCycles += c
-			console.APU.StepCycles(c)
+			console.APU.stepForConsole(c)
 		}
 		// Process one scanline
 		console.PPU.RenderScanline()

@@ -41,6 +41,9 @@ func InitAudio() {
 	time.Sleep(100 * time.Millisecond)
 	setBuzzerTone(nes.BuzzerTone{})
 	println("audio: built-in buzzer enabled (mono: pulse1 > pulse2 > triangle)")
+	if nes.BuzzerAPULite {
+		println("audio: lightweight APU enabled (waveform generation skipped)")
+	}
 }
 
 // OutputAudio updates the note once per emulated frame. Hardware PWM keeps

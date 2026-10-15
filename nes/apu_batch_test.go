@@ -198,7 +198,9 @@ func TestAPUBatchFrameIntegration(t *testing.T) {
 			if got := fast.StepFrame(); got != want {
 				t.Fatalf("mapper %d cycles %d != %d", mapper, got, want)
 			}
-			if !reflect.DeepEqual(slow, fast) {
+			if BuzzerAPULite {
+				assertBuzzerConsoleEqual(t, slow, fast)
+			} else if !reflect.DeepEqual(slow, fast) {
 				t.Fatalf("mapper %d frame %d: batch changed execution", mapper, frame)
 			}
 		}

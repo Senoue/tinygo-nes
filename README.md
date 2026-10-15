@@ -108,6 +108,65 @@ APUの `$4015` 読み出しにフレームIRQの状態ビット（bit 6）がな
 CPUのIRQを禁止したまま `$4015` をポーリングし、440Hzの音程を設定する自作プログラムの回帰テストを追加しました。
 ROMを使った一時的な調査コードは削除し、リポジトリのテストはROMなしで実行できます。
 
+## 内蔵ブザー専用の軽量APUを試す
+
+`buzzer,apulite` タグを指定すると、ブザー出力で使わないパルス波・三角波の位相更新と
+ノイズ波形の生成を省略します。音程・音量に必要なエンベロープ、スイープ、長さ／リニアカウンター、
+フレームIRQ、DMCのメモリ読み出し・CPU停止は従来どおり更新します。
+Selectでの消音中も同じ処理を続けます。CPU命令ごとのAPU更新頻度は変更していません。
+
+通常の描画頻度（2フレームに1回）の試験版:
+
+```bash
+PATH="/opt/homebrew/opt/go/bin:$PATH" \
+GOROOT=/opt/homebrew/opt/go/libexec GOTOOLCHAIN=local \
+tinygo build -target=wioterminal -tags=buzzer,perf,apulite \
+  -gc=conservative -opt=2 -stack-size=16KB \
+  -scheduler=none -panic=trap -nobounds \
+  -o tinygo-nes-apulite.uf2 .
+```
+
+速度優先版と比較する場合は、タグを `buzzer,perf,apulite,speed`、出力名を
+`tinygo-nes-speed-apulite.uf2` にします。描画間隔を揃えて比較してください。
+
+| 従来版 | 軽量APU版 | 120フレーム中の表示回数 |
+|---|---|---:|
+| `tinygo-nes-buzzer.uf2` | `tinygo-nes-apulite.uf2` | 60 |
+| `tinygo-nes-speed.uf2` | `tinygo-nes-speed-apulite.uf2` | 30 |
+
+起動ログに `audio: lightweight APU enabled (waveform generation skipped)` が出ます。
+`perf_core` の `cpu_apu_us` と、全体の `window_ms` / `emu_fps_x10` を同じ場面で比較します。
+`apulite` を外すと従来APUに戻ります。`buzzer` なしでは `apulite` を指定しても有効になりません。
+
+このモードは現在の単音ブザー出力専用です。波形位相を維持しないため、コンソール実行後の
+`APU.Output()` によるPCM波形出力には使えません。比較用の `APU.Step()` / `StepCycles()` は
+従来処理を保持し、コンソールの通常実行・詳細計測の両方でビルド設定に応じた更新経路を選びます。
+
+Apple M1上のGoベンチマーク（各3回の中央値。APUは各0.5秒、ROMは各1秒）:
+
+| 指標 | 従来APU | 軽量APU |
+|---|---:|---:|
+| APU更新・音源設定あり、DMCなし | 6.782ns | 3.166ns |
+| APU更新・DMCループあり | 10.02ns | 6.507ns |
+| ドラクエ1フレーム・2フレームに1回描画 | 270.6µs | 226.7µs |
+| ドラクエ1フレーム・4フレームに1回描画 | 235.8µs | 192.8µs |
+
+APU単体は約35〜53%、ROMのコア処理時間は約16〜18%短縮しました。LCD転送を含まないホスト上の結果です。
+実機の改善率は別途確認します。
+
+`nes/apu_buzzer_test.go` ではランダムなレジスタ操作、IRQ、カウンター周回、DMCのアドレス周回・
+ループ・読み出し順序・CPU停止を比較しています。省略対象の波形関連8フィールドだけを比較から除外し、
+その他の状態とブザー音程・音量は従来APUとの一致を検証しています。
+CPUからAPUを書き換える自作プログラムと、詳細計測経路のテストも軽量モードで実行します。
+手元のドラクエでは、各描画間隔でStart入力を含む1,200フレームの画面・RAM・SRAM・CPU状態・音程のハッシュが一致しました。
+ROMと一時的な計測コードはリポジトリに追加していません。
+
+```bash
+go test ./nes
+go test -tags=buzzer,perf,apulite ./nes
+go test ./nes -run '^$' -bench=BenchmarkBuzzerAPU -benchtime=500ms -count=3
+```
+
 ## 速度優先版を試す
 
 `speed` タグを追加すると、画面描画・LCD転送を通常の2フレームに1回から**4フレームに1回**へ減らします。
