@@ -1,6 +1,5 @@
 package nes
 
-
 const CPUFrequency = 1789773
 
 // interrupt types
@@ -111,25 +110,24 @@ var instructionPageCycles = [256]byte{
 	1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0,
 }
 
-
 type CPU struct {
-	console   *Console // direct console pointer (no interface)
-	Cycles    uint64   // number of cycles
-	PC        uint16 // program counter
-	SP        byte   // stack pointer
-	A         byte   // accumulator
-	X         byte   // x register
-	Y         byte   // y register
-	C         byte   // carry flag
-	Z         byte   // zero flag
-	I         byte   // interrupt disable flag
-	D         byte   // decimal mode flag
-	B         byte   // break command flag
-	U         byte   // unused flag
-	V         byte   // overflow flag
-	N         byte   // negative flag
-	interrupt   byte // interrupt type to perform
-	stall       int  // number of cycles to stall
+	console     *Console // direct console pointer (no interface)
+	Cycles      uint64   // number of cycles
+	PC          uint16   // program counter
+	SP          byte     // stack pointer
+	A           byte     // accumulator
+	X           byte     // x register
+	Y           byte     // y register
+	C           byte     // carry flag
+	Z           byte     // zero flag
+	I           byte     // interrupt disable flag
+	D           byte     // decimal mode flag
+	B           byte     // break command flag
+	U           byte     // unused flag
+	V           byte     // overflow flag
+	N           byte     // negative flag
+	interrupt   byte     // interrupt type to perform
+	stall       int      // number of cycles to stall
 	stepInfoBuf stepInfo // reusable buffer to avoid heap allocation
 }
 
@@ -214,14 +212,12 @@ func (cpu *CPU) writeIO(address uint16, value byte) {
 	}
 }
 
-
 // Reset resets the CPU to its initial powerup state
 func (cpu *CPU) Reset() {
 	cpu.PC = cpu.Read16(0xFFFC)
 	cpu.SP = 0xFD
 	cpu.SetFlags(0x24)
 }
-
 
 // pagesDiffer returns true if the two addresses reference different pages
 func pagesDiffer(a, b uint16) bool {
@@ -246,8 +242,34 @@ func (cpu *CPU) compare(a, b byte) {
 	}
 }
 
-// Read16 reads two bytes using Read to return a double-word value
+// Read16 reads a little-endian word. Device and bank boundaries use Read.
 func (cpu *CPU) Read16(address uint16) uint16 {
+	if address < 0x1fff {
+		ram := cpu.console.RAM
+		return uint16(ram[address&0x7ff]) | uint16(ram[(address+1)&0x7ff])<<8
+	}
+	// Resolve a discrete mapper once for both operand bytes. Never bypass
+	// the normal path across a 16 KiB bank boundary or the $FFFF wrap.
+	if address >= 0x8000 && address&0x3fff != 0x3fff {
+		var prg []byte
+		var bank int
+		switch m := cpu.console.Mapper.(type) {
+		case *Mapper2:
+			prg, bank = m.PRG, m.prgBank1
+			if address >= 0xc000 {
+				bank = m.prgBank2
+			}
+		case *Mapper3:
+			prg, bank = m.PRG, m.prgBank1
+			if address >= 0xc000 {
+				bank = m.prgBank2
+			}
+		}
+		if prg != nil {
+			i := bank*0x4000 + int(address&0x3fff)
+			return uint16(prg[i]) | uint16(prg[i+1])<<8
+		}
+	}
 	lo := uint16(cpu.Read(address))
 	hi := uint16(cpu.Read(address + 1))
 	return hi<<8 | lo

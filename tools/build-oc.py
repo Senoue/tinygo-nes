@@ -29,6 +29,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('mhz', type=int, choices=[120, 150])
 parser.add_argument('--lcd-stock', action='store_true', help='Use the normal LCD SPI request (80 MHz) instead of 24 MHz')
 parser.add_argument('--lcd-dma', action='store_true', help='Use synchronous LCD DMA (Wio Terminal channel 0)')
+parser.add_argument('--apu-lite', action='store_true', help='Skip waveform state unused by the buzzer')
 args = parser.parse_args()
 project = Path(__file__).resolve().parents[1]
 version = subprocess.check_output(['tinygo', 'version'], text=True)
@@ -69,6 +70,10 @@ with tempfile.TemporaryDirectory(prefix='tinygo-oc-') as temp:
     if args.lcd_dma:
         suffix = 'r7-dma-lcd-stock' if args.lcd_stock else 'r7-dma-lcd24'
         tags += ',lcddma'
+    if args.apu_lite:
+        suffix = 'r8-apulite-' + ('dma-' if args.lcd_dma else '') + ('lcd-stock' if args.lcd_stock else 'lcd24')
+        tags += ',apulite'
+    suffix = 'r9-core-' + suffix.split('-', 1)[1]
     output = project / f'tinygo-nes-oc{args.mhz}-{suffix}.uf2'
     subprocess.run([str(compiler), 'build', '-target=wioterminal', '-tags=' + tags,
         '-gc=conservative', '-opt=2', '-stack-size=32KB', '-scheduler=none',

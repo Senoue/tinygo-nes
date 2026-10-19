@@ -844,6 +844,7 @@ func (ppu *PPU) renderScanlineSprites(scanline int) {
 		return
 	}
 
+	line := ppu.front[scanline*256 : (scanline+1)*256]
 	// Process sprites in reverse order so lower-index sprites have priority
 	for i := ppu.spriteCount - 1; i >= 0; i-- {
 		spriteX := int(ppu.spritePositions[i])
@@ -851,22 +852,21 @@ func (ppu *PPU) renderScanlineSprites(scanline int) {
 		priority := ppu.spritePriorities[i]
 		spriteIdx := ppu.spriteIndexes[i]
 
-		for j := 0; j < 8; j++ {
-			px := spriteX + j
-			if px < 0 || px >= 256 {
-				continue
-			}
-
-			// Extract sprite pixel color from pattern (MSB first)
-			offset := uint(7 - j)
-			spriteColor := byte((pattern >> (offset * 4)) & 0x0F)
-
-			if spriteColor%4 == 0 {
-				// Transparent sprite pixel
-				continue
-			}
-
-			if px < 8 && ppu.flagShowLeftSprites == 0 {
+		start, end := spriteX, spriteX+8
+		if end > 256 {
+			end = 256
+		}
+		if start < 8 && ppu.flagShowLeftSprites == 0 {
+			start = 8
+		}
+		if start >= end {
+			continue
+		}
+		pattern <<= uint((start - spriteX) * 4)
+		for px := start; px < end; px++ {
+			spriteColor := byte(pattern >> 28)
+			pattern <<= 4
+			if spriteColor&3 == 0 {
 				continue
 			}
 
@@ -882,10 +882,10 @@ func (ppu *PPU) renderScanlineSprites(scanline int) {
 
 			// Priority: 0 = sprite in front of bg, 1 = sprite behind bg
 			if priority == 0 || bgColor == 0 {
-				ppu.front[scanline*256+px] = ppu.readPalette(uint16(spriteColor)|0x10) % 64
+				line[px] = ppu.paletteData[spriteColor|0x10] & 63
 			} else {
 				// A lower-index sprite behind the background also hides higher-index sprites.
-				ppu.front[scanline*256+px] = ppu.readPalette(uint16(background)) % 64
+				line[px] = ppu.paletteData[background] & 63
 			}
 		}
 	}

@@ -126,3 +126,16 @@ func TestCPUCartridgeMemoryBoundaries(t *testing.T) {
 		}
 	}
 }
+
+func TestRead16RAMMirrorBoundaries(t *testing.T) {
+	c := frameIRQTestConsole(t)
+	for i := range c.RAM {
+		c.RAM[i] = byte(i*19 + i/256)
+	}
+	for a := uint16(0); a < 0x1fff; a++ {
+		want := uint16(c.CPU.Read(a)) | uint16(c.CPU.Read(a+1))<<8
+		if got := c.CPU.Read16(a); got != want {
+			t.Fatalf("Read16 %04x: %04x != %04x", a, got, want)
+		}
+	}
+}

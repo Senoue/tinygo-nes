@@ -24,6 +24,10 @@ func TestDirectCPUMapperReadsMatchGeneralReads(t *testing.T) {
 				for _, value := range []byte{0, 1, 2, 3, 127, 255} {
 					c.CPU.Write(0x8000, value)
 					for address := 0x6000; address <= 0xffff; address++ {
+						word := uint16(c.CPU.Read(uint16(address))) | uint16(c.CPU.Read(uint16(address+1)))<<8
+						if got := c.CPU.Read16(uint16(address)); got != word {
+							t.Fatalf("Read16 bank=%d address=%04x: %04x != %04x", value, address, got, word)
+						}
 						got, want := c.CPU.Read(uint16(address)), c.Mapper.Read(uint16(address))
 						if got != want {
 							t.Fatalf("bank write %02x, address %04x: %02x != %02x", value, address, got, want)
