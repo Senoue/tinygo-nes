@@ -1,5 +1,5 @@
-//go:build !baremetal
-// +build !baremetal
+//go:build !baremetal && !js
+// +build !baremetal,!js
 
 package main
 

@@ -1,3 +1,5 @@
+//go:build !js && !bootdiag
+
 package main
 
 import (

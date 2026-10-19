@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tinygo-nes · WebAssembly</title>
+<style>
+body { margin: 0; background: #111827; color: #e5e7eb; font-family: system-ui, sans-serif; }
+main { max-width: 800px; margin: 32px auto; padding: 0 20px; }
+h1 { font-size: 24px; } p { line-height: 1.7; }
+canvas { display: block; background: #000; width: min(100%, 768px); height: auto; image-rendering: pixelated; border: 2px solid #475569; box-sizing: border-box; }
+.controls { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; align-items: center; }
+button, input { font: inherit; } button { padding: 8px 16px; cursor: pointer; }
+#status { min-height: 1.7em; } small { color: #94a3b8; }
+</style>
+<main>
+<h1>tinygo-nes / WebAssembly</h1>
+<p>手元の .nes ファイルを選択してプレイ。ROMはブラウザ内で処理され、サーバーへ送信されません。</p>
+<div class="controls">
+<label>ROM <input id="rom" type="file" accept=".nes" disabled></label>
+<button id="pause" disabled>一時停止</button><button id="reset" disabled>リセット</button>
+</div>
+<canvas id="screen" width="256" height="240" aria-label="NES画面"></canvas>
+<p id="status" role="status">WASMを読み込み中…</p>
+<p>十字キー：矢印キー ／ A：Z ／ B：X ／ Start：Enter ／ Select：右Shift</p>
+<small>音声・セーブデータの保存は未対応です。タブを離れると自動で一時停止します。</small>
+</main>
+<script src="wasm_exec.js"></script>
+<script src="app.js"></script>
+</html>

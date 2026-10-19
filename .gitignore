@@ -5,3 +5,6 @@ roms/
 img/
 png/
 frame300.png
+
+web/main.wasm
+web/wasm_exec.js

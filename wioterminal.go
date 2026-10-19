@@ -7,8 +7,8 @@ import (
 	"image/color"
 	"machine"
 
+	"github.com/Senoue/tinygo-nes/internal/ili9341"
 	"github.com/Senoue/tinygo-nes/nes"
-	"tinygo.org/x/drivers/ili9341"
 )
 
 var (
@@ -20,7 +20,7 @@ func init() {
 		SCK:       machine.LCD_SCK_PIN,
 		SDO:       machine.LCD_SDO_PIN,
 		SDI:       machine.LCD_SDI_PIN,
-		Frequency: 80000000,
+		Frequency: lcdSPIFrequency,
 	})
 
 	display = ili9341.NewSPI(
