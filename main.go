@@ -1,3 +1,5 @@
+//go:build !js && !bootdiag
+
 package main
 
 import (
@@ -7,74 +9,52 @@ import (
 )
 
 // Place your .nes ROM file in roms/ and update the path below.
+//
 //go:embed roms/game.nes
 var romData string
 
 func main() {
-	d := romData
-	numPRG := d[4]
-	numCHR := d[5]
-	ctrl1 := d[6]
-	ctrl2 := d[7]
-	mapperNum := (ctrl1 >> 4) | (ctrl2>>4)<<4
-	mirror := (ctrl1 & 1) | ((ctrl1>>3)&1)<<1
-	battery := (ctrl1 >> 1) & 1
-	offset := 16
-
-	prgSize := int(numPRG) * 16384
-	chrSize := int(numCHR) * 8192
-
-	prg := make([]byte, prgSize)
-	copy(prg, d[offset:offset+prgSize])
-	offset += prgSize
-
-	chr := make([]byte, chrSize)
-	copy(chr, d[offset:offset+chrSize])
-
-	cartridge := nes.NewCartridge(prg, chr, mapperNum, mirror, battery)
-	ram := make([]byte, 2048)
-	console := &nes.Console{
-		Cartridge:   cartridge,
-		Controller1: nes.NewController(),
-		Controller2: nes.NewController(),
-		RAM:         ram,
+	console, err := NewConsoleFromString(romData)
+	if err != nil {
+		panic(err.Error())
 	}
 
-	mapper, _ := nes.NewMapper(console)
-	console.Mapper = mapper
-	console.CPU = nes.NewCPUNoReset(console)
-	console.APU = nes.NewAPU(console)
-	console.PPU = nes.NewPPU(console)
+	InitAudio()
 
-	// Manual CPU reset (bypass interface)
-	console.CPU.PC = uint16(prg[len(prg)-3])<<8 | uint16(prg[len(prg)-4])
-	console.CPU.SP = 0xFD
-	console.CPU.SetFlags(0x24)
-
-	// Emulation loop - render every frame, 256px wide, 16-line batches
+	// Generate and transfer selected frames in 24-line RGB565 batches.
 	const batchLines = 24
 	const nesW = 256
 	const offsetX = 32
 	var batchBuf [nesW * 2 * batchLines]byte
 
+	var perf performanceStats
+	perf.startWindow()
 	frameCount := byte(0)
 	for {
 		buttons := GetPressedButtons()
+		HandleAudioInput(buttons[nes.ButtonSelect])
 		console.SetButtons1(buttons)
-		console.StepFrame()
 		frameCount++
+		renderFrame := frameCount%displayFrameInterval == 0
+		console.SetFrameOutput(renderFrame)
+		started := performanceNow()
+		perf.stepFrame(console, renderFrame)
+		perf.recordEmulation(started)
 
-		OutputAudio(console.APU.Output())
+		OutputAudio(console.APU)
 
-		if frameCount&1 != 0 {
+		if !renderFrame {
+			perf.finishFrame(false)
 			continue
 		}
 
 		buf := console.Buffer()
 		if buf == nil {
+			perf.finishFrame(false)
 			continue
 		}
 		for yBatch := 0; yBatch < 240; yBatch += batchLines {
+			started = performanceNow()
 			for row := 0; row < batchLines; row++ {
 				y := yBatch + row
 				lineOff := row * nesW * 2
@@ -85,8 +65,11 @@ func main() {
 					lineOff += 2
 				}
 			}
+			perf.recordConversion(started)
+			started = performanceNow()
 			display.DrawRGBBitmap8(int16(offsetX), int16(yBatch), batchBuf[:], nesW, batchLines)
+			perf.recordTransfer(started)
 		}
+		perf.finishFrame(true)
 	}
 }
-

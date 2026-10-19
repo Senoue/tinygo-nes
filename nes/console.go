@@ -32,7 +32,20 @@ func NewConsole(cartridge *Cartridge) (*Console, error) {
 	case 4, 40:
 		console.mapperHasStep = true
 	}
-	console.CPU = NewCPU(&console)
+	// Keep startup independent of interface dispatch for the TinyGo target.
+	// Most mappers initially map the last PRG bank at $FFFC; AxROM maps
+	// the first 32KB bank, and mapper 40 maps its fixed eighth 8KB bank.
+	vectorEnd := len(cartridge.PRG)
+	switch cartridge.Mapper {
+	case 7:
+		vectorEnd = 0x8000
+	case 40:
+		vectorEnd = 0x10000
+	}
+	console.CPU = NewCPUNoReset(&console)
+	console.CPU.PC = uint16(cartridge.PRG[vectorEnd-4]) | uint16(cartridge.PRG[vectorEnd-3])<<8
+	console.CPU.SP = 0xFD
+	console.CPU.SetFlags(0x24)
 	console.APU = NewAPU(&console)
 	console.PPU = NewPPU(&console)
 	return &console, nil
@@ -51,15 +64,20 @@ func (console *Console) Step() int {
 			console.Mapper.Step()
 		}
 	}
-	for i := 0; i < cpuCycles; i++ {
-		console.APU.Step()
-	}
+	console.APU.stepForConsole(cpuCycles)
 	return cpuCycles
 }
 
 func (console *Console) StepFrame() int {
 	cpuCycles := 0
 	startFrame := console.PPU.Frame
+	// Mapper 40 counts PPU cycles, so scanline-only mapper calls are insufficient.
+	if console.Cartridge.Mapper == 40 {
+		for startFrame == console.PPU.Frame {
+			cpuCycles += console.Step()
+		}
+		return cpuCycles
+	}
 	for startFrame == console.PPU.Frame {
 		// Run CPU for approximately one scanline (~114 CPU cycles = ~341 PPU cycles)
 		scanlineCycles := 0
@@ -67,9 +85,7 @@ func (console *Console) StepFrame() int {
 			c := console.CPU.Step()
 			scanlineCycles += c
 			cpuCycles += c
-			for i := 0; i < c; i++ {
-				console.APU.Step()
-			}
+			console.APU.stepForConsole(c)
 		}
 		// Process one scanline
 		console.PPU.RenderScanline()
@@ -82,6 +98,12 @@ func (console *Console) StepSeconds(seconds float64) {
 	for cycles > 0 {
 		cycles -= console.Step()
 	}
+}
+
+// SetFrameOutput controls pixel generation only; CPU/APU, PPU timing and
+// status flags continue to advance. Re-enable before a frame that is displayed.
+func (console *Console) SetFrameOutput(enabled bool) {
+	console.PPU.skipPixels = !enabled
 }
 
 func (console *Console) Buffer() *[256 * 240]byte {

@@ -16,6 +16,18 @@ func NewMapper3(cartridge *Cartridge) Mapper {
 func (m *Mapper3) Step() {
 }
 
+// readCPU is the direct CPU path for addresses $6000-$FFFF. CHR bank
+// switching still goes through Write and does not change the PRG mapping.
+func (m *Mapper3) readCPU(address uint16) byte {
+	if address >= 0xc000 {
+		return m.PRG[m.prgBank2*0x4000+int(address&0x3fff)]
+	}
+	if address >= 0x8000 {
+		return m.PRG[m.prgBank1*0x4000+int(address&0x3fff)]
+	}
+	return m.SRAM[address-0x6000]
+}
+
 func (m *Mapper3) Read(address uint16) byte {
 	switch {
 	case address < 0x2000:

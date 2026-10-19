@@ -58,6 +58,7 @@ type APU struct {
 	framePeriod  byte
 	frameValue   byte
 	frameIRQ     bool
+	frameIRQPending bool // latched status; independent of the CPU interrupt mask
 	filterChain  FilterChain
 }
 
@@ -176,7 +177,7 @@ func (apu *APU) stepLength() {
 
 func (apu *APU) fireIRQ() {
 	if apu.frameIRQ {
-		apu.console.CPU.triggerIRQ()
+		apu.frameIRQPending = true
 	}
 }
 
@@ -241,6 +242,10 @@ func (apu *APU) writeRegister(address uint16, value byte) {
 
 func (apu *APU) readStatus() byte {
 	var result byte
+	if apu.frameIRQPending {
+		result |= 0x40
+		apu.frameIRQPending = false
+	}
 	if apu.pulse1.lengthValue > 0 {
 		result |= 1
 	}
@@ -289,6 +294,9 @@ func (apu *APU) writeControl(value byte) {
 func (apu *APU) writeFrameCounter(value byte) {
 	apu.framePeriod = 4 + (value>>7)&1
 	apu.frameIRQ = (value>>6)&1 == 0
+	if !apu.frameIRQ {
+		apu.frameIRQPending = false
+	}
 	// apu.frameValue = 0
 	if apu.framePeriod == 5 {
 		apu.stepEnvelope()

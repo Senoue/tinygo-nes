@@ -1,5 +1,5 @@
-//go:build !baremetal
-// +build !baremetal
+//go:build !baremetal && !js
+// +build !baremetal,!js
 
 package main
 
@@ -40,8 +40,4 @@ func GetPressedButtons() [8]bool {
 		buttons[nes.ButtonStart] = true
 	}
 	return buttons
-}
-
-func OutputAudio(sample float32) {
-	// No audio on desktop
 }
